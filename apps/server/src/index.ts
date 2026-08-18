@@ -7,6 +7,7 @@ import { PlayerIntention, RoomState } from '@ai-trpg/shared';
 import { moduleService } from './services/ModuleService';
 import { GameEngineService } from './services/GameEngineService';
 import { questService } from './services/QuestService';
+import { roomStore } from './state/roomStore';
 
 const app = express();
 const httpServer = createServer(app);
@@ -24,8 +25,9 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
 
-// 简单的内存房间状态字典 (MVP阶段)
-export const memoryRooms: Record<string, RoomState> = {};
+// Load persisted rooms on startup
+roomStore.loadRoomStates();
+
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -48,7 +50,7 @@ app.post('/api/rooms', (req, res) => {
   const { module_id, campaign_mode, combat_mode } = req.body;
   const room_id = `r_${Math.random().toString(36).substr(2, 6)}`;
   
-  memoryRooms[room_id] = {
+  roomStore.memoryRooms[room_id] = {
     room_id,
     module_id,
     campaign_mode,
@@ -58,11 +60,13 @@ app.post('/api/rooms', (req, res) => {
     quests: questService.loadQuests(room_id)
   };
 
-  res.json({ room_id, state: memoryRooms[room_id] });
+  roomStore.saveRoomState(room_id);
+
+  res.json({ room_id, state: roomStore.memoryRooms[room_id] });
 });
 
 app.get('/api/rooms/:room_id', (req, res) => {
-  const room = memoryRooms[req.params.room_id];
+  const room = roomStore.memoryRooms[req.params.room_id];
   if (!room) {
     res.status(404).json({ error: 'Room not found' });
     return;
@@ -77,7 +81,7 @@ app.get('/api/templates/characters', (req, res) => {
 
 // 加入房间并选择角色
 app.post('/api/rooms/:room_id/join', (req, res) => {
-  const room = memoryRooms[req.params.room_id];
+  const room = roomStore.memoryRooms[req.params.room_id];
   if (!room) {
     res.status(404).json({ error: 'Room not found' });
     return;
@@ -100,6 +104,7 @@ app.post('/api/rooms/:room_id/join', (req, res) => {
 
   // 在房间中注册该角色
   room.characters[template.character_id] = { ...template };
+  roomStore.saveRoomState(room.room_id);
   
   // 通过 WebSocket 通知房间内的其他人状态更新
   io.to(room.room_id).emit('room_state_sync', room);
@@ -115,8 +120,8 @@ io.on('connection', (socket) => {
     console.log(`Socket ${socket.id} joined room ${roomId}`);
     
     // 发送当前房间状态给刚加入的玩家
-    if (memoryRooms[roomId]) {
-      socket.emit('room_state_sync', memoryRooms[roomId]);
+    if (roomStore.memoryRooms[roomId]) {
+      socket.emit('room_state_sync', roomStore.memoryRooms[roomId]);
     }
   });
 

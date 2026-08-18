@@ -3,7 +3,7 @@ import { PlayerIntention, RoomState, StateUpdateCommand } from '@ai-trpg/shared'
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
 import { moduleService } from './ModuleService';
-import { memoryRooms } from '../index'; // 我们需要重构一下或者直接在这里引用
+import { roomStore } from '../state/roomStore';
 import { questService } from './QuestService';
 
 dotenv.config();
@@ -17,7 +17,7 @@ const openai = new OpenAI({
   }
 });
 
-const BATCH_WINDOW_MS = 10000; // MVP阶段为方便测试设为10秒
+const BATCH_WINDOW_MS = 4000; // 动态防抖窗口设为4秒
 
 export class GameEngineService {
   private io: Server;
@@ -38,16 +38,19 @@ export class GameEngineService {
     
     this.intentQueues.get(roomId)!.push(intention);
     
-    // 如果没有正在计时的定时器，则启动一个
-    if (!this.processingTimers.has(roomId)) {
-      const timer = setTimeout(() => {
-        this.processBatch(roomId);
-      }, BATCH_WINDOW_MS);
-      this.processingTimers.set(roomId, timer);
-      
-      // 通知前端AI开始思考/等待收集
-      this.io.to(roomId).emit('system_message', { content: '[SYSTEM] Neural cogitators processing inputs...' });
+    // 防抖逻辑：如果已经有定时器，清除它
+    if (this.processingTimers.has(roomId)) {
+      clearTimeout(this.processingTimers.get(roomId)!);
+    } else {
+      // 第一次收到意图时，通知前端开始处理
+      this.io.to(roomId).emit('system_state', { processing: true });
     }
+    
+    // 重新启动倒计时
+    const timer = setTimeout(() => {
+      this.processBatch(roomId);
+    }, BATCH_WINDOW_MS);
+    this.processingTimers.set(roomId, timer);
   }
 
   private async processBatch(roomId: string) {
@@ -58,11 +61,11 @@ export class GameEngineService {
 
     if (intentions.length === 0) return;
 
-    const room = memoryRooms[roomId];
+    const room = roomStore.memoryRooms[roomId];
     if (!room) return;
 
     try {
-      this.io.to(roomId).emit('system_message', { content: '[SYSTEM] Establishing connection with Machine Spirit...' });
+      this.io.to(roomId).emit('system_state', { processing: true }); // 确保状态
       
       // TODO: 完整的两段式请求架构
       // 阶段一：解析意图，判断是否需要检定
@@ -110,6 +113,8 @@ export class GameEngineService {
         content: finalResult.narration,
         timestamp: Date.now()
       });
+      
+      this.io.to(roomId).emit('system_state', { processing: false });
 
       // 应用状态更新
       if (finalResult.state_updates && finalResult.state_updates.length > 0) {
@@ -120,6 +125,7 @@ export class GameEngineService {
     } catch (err) {
       console.error('Batch processing failed:', err);
       this.io.to(roomId).emit('system_message', { content: '[SYSTEM ERROR] Machine Spirit disruption detected. Please re-transmit.' });
+      this.io.to(roomId).emit('system_state', { processing: false });
     }
   }
 
@@ -264,19 +270,44 @@ Return JSON ONLY with no markdown formatting:
       
       switch (update.type) {
         case 'hp_change':
-           // 简化版伤害逻辑
            if (update.delta && update.delta < 0) {
-              const currentHpIdx = char.hp_track.indexOf('健康');
-              if (currentHpIdx !== -1) {
-                 char.hp_track[currentHpIdx] = '轻伤'; // 极度简化
+              const order = ['健康', '轻伤', '重伤', '濒死'];
+              const idx = char.hp_track.findLastIndex(s => order.includes(s) && s === '健康');
+              if (idx !== -1) char.hp_track[idx] = '轻伤';
+              else {
+                 const woundIdx = char.hp_track.findLastIndex(s => s === '轻伤');
+                 if (woundIdx !== -1) char.hp_track[woundIdx] = '重伤';
+                 else {
+                    const criticalIdx = char.hp_track.findLastIndex(s => s === '重伤');
+                    if (criticalIdx !== -1) char.hp_track[criticalIdx] = '濒死';
+                 }
               }
+           } else if (update.delta && update.delta > 0) {
+              // Simple healing
+              const idx = char.hp_track.findIndex(s => s !== '健康' && s !== '阵亡');
+              if (idx !== -1) char.hp_track[idx] = '健康';
            }
+           break;
+        case 'fear_change':
+           char.fear = Math.max(0, Math.min(3, char.fear + (update.delta ?? 0)));
+           break;
+        case 'corruption_change':
+           char.corruption = Math.max(0, char.corruption + (update.delta ?? 0));
            break;
         case 'item_gain':
            if (update.value) char.inventory.push(update.value);
            break;
+        case 'item_loss':
+           if (update.value) {
+              const itemIdx = char.inventory.findIndex(i => i === update.value);
+              if (itemIdx !== -1) char.inventory.splice(itemIdx, 1);
+           }
+           break;
       }
     }
+
+    // Persist room state after updates
+    roomStore.saveRoomState(room.room_id);
 
     if (questsUpdated && room.quests) {
       questService.saveQuests(room.room_id, room.quests);

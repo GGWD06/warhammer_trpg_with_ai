@@ -12,26 +12,35 @@ export default function RoomPage() {
   const [templates, setTemplates] = useState<CharacterCard[]>([]);
   const [myCharacterId, setMyCharacterId] = useState<string | null>(null);
   
+  const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
+  
   const [socket, setSocket] = useState<Socket | null>(null);
   const [chatLog, setChatLog] = useState<PlayerIntention[]>([]);
   const [inputValue, setInputValue] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // 0. 尝试恢复身份
+    const savedChar = localStorage.getItem(`trpg_char_${roomId}`);
+    if (savedChar) {
+      setMyCharacterId(savedChar);
+    }
+
     // 1. 获取房间状态
-    fetch(`http://localhost:3001/api/rooms/${roomId}`)
+    fetch(`${SERVER_URL}/api/rooms/${roomId}`)
       .then(res => res.json())
       .then(data => {
         if (!data.error) setRoomState(data);
       });
 
     // 2. 获取可选角色模板
-    fetch(`http://localhost:3001/api/templates/characters`)
+    fetch(`${SERVER_URL}/api/templates/characters`)
       .then(res => res.json())
       .then(data => setTemplates(data));
 
     // 3. 建立 WebSocket 连接
-    const newSocket = io('http://localhost:3001');
+    const newSocket = io(SERVER_URL);
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
@@ -70,6 +79,10 @@ export default function RoomPage() {
       } as PlayerIntention]);
     });
 
+    newSocket.on('system_state', (state: { processing: boolean }) => {
+      setIsProcessing(state.processing);
+    });
+
     return () => {
       newSocket.disconnect();
     };
@@ -81,7 +94,7 @@ export default function RoomPage() {
 
   const joinRoomAs = async (templateId: string) => {
     try {
-      const res = await fetch(`http://localhost:3001/api/rooms/${roomId}/join`, {
+      const res = await fetch(`${SERVER_URL}/api/rooms/${roomId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ character_template_id: templateId })
@@ -89,8 +102,9 @@ export default function RoomPage() {
       const data = await res.json();
       if (data.success) {
         setMyCharacterId(templateId);
+        localStorage.setItem(`trpg_char_${roomId}`, templateId);
         // Refresh room state to see myself
-        const stateRes = await fetch(`http://localhost:3001/api/rooms/${roomId}`);
+        const stateRes = await fetch(`${SERVER_URL}/api/rooms/${roomId}`);
         const stateData = await stateRes.json();
         setRoomState(stateData);
       } else {
@@ -116,6 +130,7 @@ export default function RoomPage() {
     };
 
     socket.emit('player_intention', intention);
+    setIsProcessing(true);
     setInputValue('');
   };
 
@@ -205,13 +220,28 @@ export default function RoomPage() {
                     </div>
                     <div className="flex gap-1.5 h-3">
                       {roomState.characters[myCharacterId].hp_track.map((status, i) => (
-                        <div key={i} className={`flex-1 rounded-sm ${status === '健康' ? 'bg-emerald-800/80 border border-emerald-900' : 'bg-red-900 border border-red-800'}`}></div>
+                        <div key={i} className={`flex-1 rounded-sm ${status === '健康' ? 'bg-emerald-800/80 border border-emerald-900' : status === '轻伤' ? 'bg-amber-600 border border-amber-700' : 'bg-red-900 border border-red-800'}`}></div>
                       ))}
+                    </div>
+                    
+                    <div className="flex justify-between items-center mb-2 mt-4">
+                       <h4 className="text-xs text-slate-500 uppercase tracking-widest">Fear Level</h4>
+                       <span className="text-[10px] text-slate-600 font-mono">{roomState.characters[myCharacterId].fear || 0}/3</span>
+                    </div>
+                    <div className="flex gap-1.5 h-3">
+                      {[1, 2, 3].map((level) => (
+                        <div key={level} className={`flex-1 rounded-sm ${(roomState.characters[myCharacterId].fear || 0) >= level ? 'bg-purple-600 border border-purple-500 shadow-[0_0_8px_rgba(147,51,234,0.5)]' : 'bg-slate-900 border border-slate-800'}`}></div>
+                      ))}
+                    </div>
+
+                    <div className="flex justify-between items-center mb-2 mt-4">
+                       <h4 className="text-xs text-slate-500 uppercase tracking-widest">Corruption</h4>
+                       <span className="text-[10px] text-red-500 font-mono font-bold">{roomState.characters[myCharacterId].corruption || 0}</span>
                     </div>
                   </div>
 
                   <div className="mb-6">
-                     <h4 className="text-xs text-slate-500 uppercase tracking-widest mb-3">Inventory</h4>
+                     <h4 className="text-xs text-slate-500 uppercase tracking-widest mb-3 border-b border-slate-800 pb-2">Inventory</h4>
                      <ul className="space-y-2">
                        {roomState.characters[myCharacterId].inventory.map((item, idx) => (
                           <li key={idx} className="text-xs text-slate-400 bg-slate-950/50 p-2 rounded border border-slate-800 font-mono">
@@ -220,6 +250,26 @@ export default function RoomPage() {
                        ))}
                      </ul>
                   </div>
+
+                  {roomState.quests && Object.keys(roomState.quests).length > 0 && (
+                    <div className="mb-6">
+                      <h4 className="text-xs text-slate-500 uppercase tracking-widest mb-3 border-b border-slate-800 pb-2">Active Directives</h4>
+                      <ul className="space-y-3">
+                        {Object.values(roomState.quests).map((quest, idx) => (
+                           <li key={idx} className="bg-slate-950/50 p-3 rounded border border-slate-800 relative overflow-hidden">
+                              <div className={`absolute left-0 top-0 bottom-0 w-1 ${quest.status === 'completed' ? 'bg-emerald-600' : quest.status === 'failed' ? 'bg-red-900' : 'bg-amber-600'}`}></div>
+                              <div className="pl-2">
+                                <div className="flex justify-between items-start mb-1">
+                                  <h5 className="text-sm font-bold text-slate-300">{quest.title}</h5>
+                                  <span className={`text-[10px] uppercase tracking-wider font-mono ${quest.status === 'completed' ? 'text-emerald-500' : quest.status === 'failed' ? 'text-red-700' : 'text-amber-500'}`}>{quest.status.replace('_', ' ')}</span>
+                                </div>
+                                <p className="text-xs text-slate-400 font-mono leading-relaxed">{quest.progress_description}</p>
+                              </div>
+                           </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
             </aside>
@@ -232,14 +282,43 @@ export default function RoomPage() {
                      -- Encrypted Comm Link Established --
                    </p>
                  </div>
-                 {chatLog.map((msg, i) => (
-                    <div key={i} className="mb-4">
-                      <span className={`font-bold ${msg.character_name === 'SYSTEM' ? 'text-slate-500' : msg.character_name === 'DM (AI)' ? 'text-red-500' : 'text-amber-500'}`}>[{msg.character_name}] </span>
-                      <span className={`${msg.character_name === 'SYSTEM' ? 'text-slate-500 font-mono text-xs' : msg.character_name === 'DM (AI)' ? 'text-slate-200' : 'text-slate-300'}`}>
-                        {msg.content.split('\n').map((line, idx) => <span key={idx}>{line}<br/></span>)}
-                      </span>
+                 {chatLog.map((msg, i) => {
+                    const isMine = msg.character_id === myCharacterId;
+                    const isDM = msg.character_name === 'DM (AI)';
+                    const isSystem = msg.character_name === 'SYSTEM' || msg.character_name === 'DICE_SYSTEM';
+
+                    return (
+                      <div key={i} className={`mb-4 flex ${isMine ? 'justify-end' : 'justify-start'} ${isDM ? 'w-full' : ''}`}>
+                        <div className={`
+                          p-3 rounded max-w-[85%] 
+                          ${isMine ? 'bg-amber-900/20 border border-amber-700/50' : ''}
+                          ${isDM ? 'w-full max-w-full bg-slate-950 border-l-2 border-red-800 p-5 shadow-lg shadow-red-900/10' : ''}
+                          ${(!isMine && !isDM && !isSystem) ? 'bg-slate-800/50 border border-slate-700' : ''}
+                          ${isSystem ? 'bg-transparent border-none p-1 text-slate-500 font-mono text-xs' : ''}
+                        `}>
+                          <div className={`font-bold text-xs mb-1.5 ${isMine ? 'text-amber-500 text-right' : isDM ? 'text-red-500 uppercase tracking-widest' : isSystem ? 'text-slate-500' : 'text-slate-400'}`}>
+                            {msg.character_name}
+                          </div>
+                          <div className={`${isSystem ? 'text-slate-500' : isDM ? 'text-slate-300 leading-loose' : 'text-slate-200'}`}>
+                            {msg.content.split('\n').map((line, idx) => <span key={idx}>{line}<br/></span>)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                 })}
+                 {isProcessing && (
+                    <div className="flex justify-start mb-4">
+                       <div className="p-3 bg-slate-950 border border-slate-800 rounded flex items-center space-x-3">
+                          <div className="text-amber-600 font-bold text-xs uppercase tracking-widest">SYSTEM</div>
+                          <div className="flex space-x-1">
+                             <div className="w-1.5 h-1.5 bg-amber-600 rounded-full animate-pulse"></div>
+                             <div className="w-1.5 h-1.5 bg-amber-600 rounded-full animate-pulse delay-75"></div>
+                             <div className="w-1.5 h-1.5 bg-amber-600 rounded-full animate-pulse delay-150"></div>
+                          </div>
+                          <span className="text-xs font-mono text-slate-500 tracking-widest uppercase ml-2">Establishing Vox-Link to Machine Spirit...</span>
+                       </div>
                     </div>
-                 ))}
+                 )}
                  <div ref={chatEndRef} />
               </div>
               

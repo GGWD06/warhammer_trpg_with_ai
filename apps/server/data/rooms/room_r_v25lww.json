@@ -1,0 +1,38 @@
+{
+  "room_id": "r_v25lww",
+  "module_id": "m_whispers_of_the_derelict",
+  "campaign_mode": "single",
+  "combat_mode": "narrative",
+  "characters": {
+    "c001": {
+      "character_id": "c001",
+      "name": "格罗姆",
+      "callsign": "铁砧",
+      "origin": "帝国近卫军老兵",
+      "attributes": {
+        "MIG": 2,
+        "REF": 1,
+        "AWA": 1,
+        "WIL": 1,
+        "TAC": 2,
+        "INF": -1
+      },
+      "hp_track": [
+        "健康",
+        "健康",
+        "健康",
+        "健康"
+      ],
+      "fear": 0,
+      "corruption": 0,
+      "inventory": [
+        "军用链剑（精良）",
+        "激光枪（常规）",
+        "急救绷带 x2"
+      ],
+      "milestones": 0
+    }
+  },
+  "current_scene": "登船甲板",
+  "quests": {}
+}

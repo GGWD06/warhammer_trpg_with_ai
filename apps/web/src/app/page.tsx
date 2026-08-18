@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function Home() {
+  const SERVER_URL = process.env.NEXT_PUBLIC_SERVER_URL || 'http://localhost:3001';
   const router = useRouter();
   const [modules, setModules] = useState<any[]>([]);
   const [selectedModule, setSelectedModule] = useState<string>('');
@@ -12,7 +13,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('http://localhost:3001/api/modules')
+    fetch(`${SERVER_URL}/api/modules`)
       .then(res => res.json())
       .then(data => {
         setModules(data);
@@ -27,7 +28,7 @@ export default function Home() {
 
   const createRoom = async () => {
     try {
-      const res = await fetch('http://localhost:3001/api/rooms', {
+      const res = await fetch(`${SERVER_URL}/api/rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
