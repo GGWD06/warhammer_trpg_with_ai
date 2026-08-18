@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import crypto from 'crypto';
 import cors from 'cors';
 import { PRESET_CHARACTERS } from './data/characters';
 import { PlayerIntention, RoomState } from '@ai-trpg/shared';
@@ -48,7 +49,7 @@ app.get('/api/modules', (req, res) => {
 // 基础的房间 API (迭代二: 房间创建)
 app.post('/api/rooms', (req, res) => {
   const { module_id, campaign_mode, combat_mode } = req.body;
-  const room_id = `r_${Math.random().toString(36).substr(2, 6)}`;
+  const room_id = `r_${crypto.randomUUID().substring(0, 6)}`;
   
   roomStore.memoryRooms[room_id] = {
     room_id,
@@ -62,11 +63,11 @@ app.post('/api/rooms', (req, res) => {
 
   roomStore.saveRoomState(room_id);
 
-  res.json({ room_id, state: roomStore.memoryRooms[room_id] });
+  res.json({ room_id, state: roomStore.getPublicRoomState(room_id) });
 });
 
 app.get('/api/rooms/:room_id', (req, res) => {
-  const room = roomStore.memoryRooms[req.params.room_id];
+  const room = roomStore.getPublicRoomState(req.params.room_id);
   if (!room) {
     res.status(404).json({ error: 'Room not found' });
     return;
@@ -107,7 +108,7 @@ app.post('/api/rooms/:room_id/join', (req, res) => {
   roomStore.saveRoomState(room.room_id);
   
   // 通过 WebSocket 通知房间内的其他人状态更新
-  io.to(room.room_id).emit('room_state_sync', room);
+  io.to(room.room_id).emit('room_state_sync', roomStore.getPublicRoomState(room.room_id));
 
   res.json({ success: true, character: template });
 });
@@ -120,8 +121,9 @@ io.on('connection', (socket) => {
     console.log(`Socket ${socket.id} joined room ${roomId}`);
     
     // 发送当前房间状态给刚加入的玩家
-    if (roomStore.memoryRooms[roomId]) {
-      socket.emit('room_state_sync', roomStore.memoryRooms[roomId]);
+    const publicRoom = roomStore.getPublicRoomState(roomId);
+    if (publicRoom) {
+      socket.emit('room_state_sync', publicRoom);
     }
   });
 

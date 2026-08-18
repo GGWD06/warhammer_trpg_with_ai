@@ -1,7 +1,8 @@
 import { Server } from 'socket.io';
-import { PlayerIntention, RoomState, StateUpdateCommand } from '@ai-trpg/shared';
+import { PlayerIntention, StateUpdateCommand } from '@ai-trpg/shared';
 import OpenAI from 'openai';
 import dotenv from 'dotenv';
+import crypto from 'crypto';
 import { moduleService } from './ModuleService';
 import { roomStore } from '../state/roomStore';
 import { questService } from './QuestService';
@@ -93,7 +94,7 @@ export class GameEngineService {
              
              // 广播骰子结果给玩家
              this.io.to(roomId).emit('chat_broadcast', {
-               message_id: Math.random().toString(),
+               message_id: crypto.randomUUID(),
                room_id: roomId,
                character_id: 'sys',
                character_name: 'DICE_SYSTEM',
@@ -119,7 +120,7 @@ export class GameEngineService {
       // 应用状态更新
       if (finalResult.state_updates && finalResult.state_updates.length > 0) {
         this.applyStateUpdates(room, finalResult.state_updates);
-        this.io.to(roomId).emit('room_state_sync', room);
+        this.io.to(roomId).emit('room_state_sync', roomStore.getPublicRoomState(roomId));
       }
       
     } catch (err) {
@@ -230,7 +231,7 @@ Return JSON ONLY with no markdown formatting:
     }
   }
 
-  private applyStateUpdates(room: RoomState, updates: StateUpdateCommand[]) {
+  private applyStateUpdates(room: any, updates: StateUpdateCommand[]) {
     let questsUpdated = false;
 
     // MVP 简单状态应用逻辑

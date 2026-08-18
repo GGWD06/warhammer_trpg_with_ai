@@ -57,7 +57,7 @@ export default function RoomPage() {
 
     newSocket.on('system_message', (msg: { content: string }) => {
       setChatLog(prev => [...prev, { 
-        message_id: Math.random().toString(), 
+        message_id: crypto.randomUUID(), 
         room_id: roomId, 
         character_id: 'sys', 
         character_name: 'SYSTEM', 
@@ -69,7 +69,7 @@ export default function RoomPage() {
 
     newSocket.on('narrative_broadcast', (msg: { content: string, timestamp: number }) => {
       setChatLog(prev => [...prev, { 
-        message_id: Math.random().toString(), 
+        message_id: crypto.randomUUID(), 
         room_id: roomId, 
         character_id: 'dm', 
         character_name: 'DM (AI)', 
@@ -120,7 +120,7 @@ export default function RoomPage() {
 
     const char = roomState.characters[myCharacterId];
     const intention: PlayerIntention = {
-      message_id: Math.random().toString(36).substring(7),
+      message_id: crypto.randomUUID(),
       room_id: roomId,
       character_id: myCharacterId,
       character_name: char.name,

@@ -2,10 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { RoomState } from '@ai-trpg/shared';
 
+export interface ServerRoomState extends RoomState {
+  history?: { role: 'system' | 'user' | 'assistant', content: string }[];
+}
+
 const DATA_DIR = path.join(process.cwd(), 'data', 'rooms');
 
 export class RoomStore {
-  public memoryRooms: Record<string, RoomState> = {};
+  public memoryRooms: Record<string, ServerRoomState> = {};
 
   constructor() {
     if (!fs.existsSync(DATA_DIR)) {
@@ -25,7 +29,7 @@ export class RoomStore {
         if (file.endsWith('.json') && file.startsWith('room_')) {
           const filePath = path.join(DATA_DIR, file);
           const data = fs.readFileSync(filePath, 'utf-8');
-          const roomState = JSON.parse(data) as RoomState;
+          const roomState = JSON.parse(data) as ServerRoomState;
           this.memoryRooms[roomState.room_id] = roomState;
           count++;
         }
@@ -51,6 +55,13 @@ export class RoomStore {
     } catch (error) {
       console.error(`Failed to save room state for ${roomId}:`, error);
     }
+  }
+
+  public getPublicRoomState(roomId: string): RoomState | null {
+    const room = this.memoryRooms[roomId];
+    if (!room) return null;
+    const { history, ...publicRoom } = room;
+    return publicRoom;
   }
 }
 

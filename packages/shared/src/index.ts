@@ -62,7 +62,6 @@ export interface RoomState {
   module_id: string;
   characters: Record<string, CharacterCard>; // char_id -> card
   current_scene?: string; // 当前所处场景
-  history?: { role: 'system' | 'user' | 'assistant', content: string }[]; // 对话历史记录，用于解决 DM 健忘症
   quests?: Record<string, QuestProgress>; // quest_id -> QuestProgress
 }
 
