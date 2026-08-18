@@ -180,6 +180,7 @@ CRITICAL RULES FOR DM NARRATION:
 3. END WITH A HOOK: NEVER end your narration passively. Always end by presenting a clear hook, choice, or immediate danger, followed by prompting the players (e.g., "What do you do?").
 4. DO NOT PLAY FOR THE PLAYERS: Describe the consequences of their actions and the changing environment, but never decide how they feel or what they do next.
 
+${room.summary ? `Previous Events Summary (Mid-term Memory):\n${room.summary}\n` : ''}
 ${sceneContext}
 
 Characters in scene:
@@ -218,7 +219,12 @@ Return JSON ONLY with no markdown formatting:
     room.history.push({ role: 'user', content: currentActionContent });
 
     if (room.history.length > 20) {
-      room.history = room.history.slice(room.history.length - 20);
+      // 提取最老的 10 条记录去生成摘要
+      const historyToSummarize = room.history.slice(0, 10);
+      // 保留最新的记录
+      room.history = room.history.slice(10);
+      // 异步触发摘要生成，不阻塞本次回复
+      this.summarizeHistory(room.room_id, historyToSummarize).catch(e => console.error(e));
     }
 
     const messages: any[] = [
@@ -399,6 +405,135 @@ Return JSON ONLY with no markdown formatting:
       this.io.to(roomId).emit('system_message', { content: '[SYSTEM ERROR] Failed to initialize Vox-Link.' });
     } finally {
       this.io.to(roomId).emit('system_state', { processing: false });
+    }
+  }
+
+  private async summarizeHistory(roomId: string, historyToSummarize: any[]): Promise<void> {
+    const room = roomStore.memoryRooms[roomId] as any;
+    if (!room) return;
+
+    const previousSummary = room.summary || "No previous events.";
+    const conversationText = historyToSummarize.map(m => `[${m.role.toUpperCase()}]: ${m.content}`).join('\n');
+
+    const systemPrompt = `
+You are the AI memory compressor for a TRPG.
+Your task is to merge the "Previous Summary" with the new "Recent Conversation" into a single, concise, rolling summary.
+Focus on:
+1. Major story beats and location changes.
+2. Important decisions made by players.
+3. Items acquired or lost.
+4. Quests progressed.
+
+Keep the summary under 150 words. Be terse.
+
+Previous Summary:
+${previousSummary}
+
+Recent Conversation:
+${conversationText}
+
+Output the new summary ONLY, with no markdown formatting or extra commentary.
+`;
+
+    try {
+      console.log(`[Memory] Compressing ${historyToSummarize.length} old messages into summary...`);
+      const completion = await openai.chat.completions.create({
+        model: "deepseek/deepseek-chat",
+        messages: [{ role: "system", content: systemPrompt }]
+      });
+
+      const newSummary = completion.choices[0].message.content || '';
+      room.summary = newSummary.trim();
+      console.log(`[Memory] Summary updated: ${room.summary.substring(0, 50)}...`);
+      
+      roomStore.saveRoomState(roomId);
+    } catch (e) {
+      console.error('[Memory] Failed to summarize history:', e);
+    }
+  }
+
+  // --- 自由创角 (Character Creation) ---
+  public async handleCharacterCreationStart(): Promise<{ message: string, state: any[] }> {
+    const prompt = `
+You are the Game Master helping a player create a character for a Warhammer 40k TRPG.
+Your goal is to ask them ONE engaging question to start building their background or class.
+For example: "Do you hail from a wealthy Hive Spire, or the muddy trenches of the Imperial Guard?"
+Keep it short and flavorful.
+`;
+    try {
+      const completion = await openai.chat.completions.create({
+        model: "deepseek/deepseek-chat",
+        messages: [{ role: "system", content: prompt }]
+      });
+      const message = completion.choices[0].message.content || 'Who are you, traveler?';
+      return { 
+        message, 
+        state: [
+          { role: 'system', content: prompt },
+          { role: 'assistant', content: message }
+        ] 
+      };
+    } catch (e) {
+      return { message: "Error initializing Vox. Who are you?", state: [] };
+    }
+  }
+
+  public async handleCharacterCreationReply(reply: string, history: any[]): Promise<{ message: string, character_card?: any, state: any[] }> {
+    const newHistory = [...history, { role: 'user', content: reply }];
+    
+    // We append a meta prompt to check if we have enough info to generate the card.
+    const metaPrompt = `
+Review the conversation so far. If you have enough information about the character's background, combat style, and personality (usually takes 2-3 exchanges), generate their final character card.
+Stats to generate (MIG, REF, AWA, WIL, TAC, INF) should average around 0 to +2.
+If you need more info, just ask the next question in plain text.
+
+If you are ready to finalize, you MUST output ONLY a JSON object in this exact format (do not include any other text):
+{
+  "is_complete": true,
+  "character_card": {
+    "name": "Generated Name if none provided",
+    "callsign": "Nickname",
+    "origin": "Short background description",
+    "attributes": { "MIG": 1, "REF": 0, "AWA": 2, "WIL": -1, "TAC": 0, "INF": 1 },
+    "inventory": ["Item 1", "Item 2"]
+  }
+}
+If you are NOT ready, just reply normally as the Game Master asking the next question.
+`;
+    
+    try {
+      const completion = await openai.chat.completions.create({
+        model: "deepseek/deepseek-chat",
+        messages: [...newHistory, { role: "system", content: metaPrompt }]
+      });
+
+      const responseText = completion.choices[0].message.content || '';
+      
+      // Try to parse JSON
+      try {
+        const parsed = JSON.parse(responseText);
+        if (parsed.is_complete && parsed.character_card) {
+          // Add default required fields
+          const finalCard = {
+            ...parsed.character_card,
+            character_id: crypto.randomUUID(),
+            hp_track: ['健康', '健康', '健康', '健康'],
+            fear: 0,
+            corruption: 0,
+            milestones: 0
+          };
+          return { message: "Character generation complete.", character_card: finalCard, state: newHistory };
+        }
+      } catch (e) {
+        // Not JSON, it's just a conversational reply
+      }
+
+      newHistory.push({ role: 'assistant', content: responseText });
+      return { message: responseText, state: newHistory };
+
+    } catch (e) {
+      console.error(e);
+      return { message: "Vox link error.", state: newHistory };
     }
   }
 }

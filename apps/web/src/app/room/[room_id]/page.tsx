@@ -19,6 +19,14 @@ export default function RoomPage() {
   const [inputValue, setInputValue] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  
+  // Custom Character Creation State
+  const [isCreatingCustom, setIsCreatingCustom] = useState(false);
+  const [creationHistory, setCreationHistory] = useState<{role: 'ai' | 'player', content: string}[]>([]);
+  const [creationServerState, setCreationServerState] = useState<any[]>([]);
+  const [creationInput, setCreationInput] = useState('');
+  const [isCreationProcessing, setIsCreationProcessing] = useState(false);
+  const creationEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // 0. 尝试恢复身份
@@ -92,6 +100,10 @@ export default function RoomPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatLog]);
 
+  useEffect(() => {
+    creationEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [creationHistory]);
+
   const joinRoomAs = async (templateId: string) => {
     try {
       const res = await fetch(`${SERVER_URL}/api/rooms/${roomId}/join`, {
@@ -144,6 +156,56 @@ export default function RoomPage() {
     setInputValue('');
   };
 
+  const startCustomCreation = async () => {
+    setIsCreatingCustom(true);
+    setIsCreationProcessing(true);
+    try {
+      const res = await fetch(`${SERVER_URL}/api/rooms/${roomId}/custom_char/start`, { method: 'POST' });
+      const data = await res.json();
+      setCreationHistory([{ role: 'ai', content: data.message }]);
+      setCreationServerState(data.state);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsCreationProcessing(false);
+    }
+  };
+
+  const sendCreationReply = async () => {
+    if (!creationInput.trim()) return;
+    const reply = creationInput;
+    setCreationInput('');
+    setCreationHistory(prev => [...prev, { role: 'player', content: reply }]);
+    setIsCreationProcessing(true);
+    
+    try {
+      const res = await fetch(`${SERVER_URL}/api/rooms/${roomId}/custom_char/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reply, state: creationServerState })
+      });
+      const data = await res.json();
+      
+      setCreationHistory(prev => [...prev, { role: 'ai', content: data.message }]);
+      setCreationServerState(data.state);
+      
+      if (data.character_card) {
+        // AI finished character creation
+        const newCharId = data.character_card.character_id;
+        setMyCharacterId(newCharId);
+        localStorage.setItem(`trpg_char_${roomId}`, newCharId);
+        const stateRes = await fetch(`${SERVER_URL}/api/rooms/${roomId}`);
+        const stateData = await stateRes.json();
+        setRoomState(stateData);
+        setIsCreatingCustom(false);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsCreationProcessing(false);
+    }
+  };
+
   if (!roomState) return <div className="p-8 text-white font-mono animate-pulse">Establishing Vox-Link to Room {roomId}...</div>;
 
   const isPlayerReady = myCharacterId !== null;
@@ -162,33 +224,85 @@ export default function RoomPage() {
               <span className="w-2 h-6 bg-amber-600 mr-3 block"></span>
               Awaiting Operative Assignment
             </h2>
-            <div className="grid grid-cols-2 gap-6">
-              {templates.map(tpl => {
-                const isTaken = Object.values(roomState.characters).some(c => c.character_id === tpl.character_id);
-                return (
-                  <div 
-                    key={tpl.character_id} 
-                    className={`group p-6 border rounded shadow-lg transition-all duration-300 ${isTaken ? 'border-slate-800 opacity-40 bg-slate-900/30 cursor-not-allowed' : 'border-slate-700 bg-slate-900/80 hover:border-amber-500/80 hover:bg-slate-900 cursor-pointer hover:-translate-y-1'}`} 
-                    onClick={() => !isTaken && joinRoomAs(tpl.character_id)}
-                  >
-                    <h3 className="text-xl font-bold text-amber-400 mb-1">{tpl.name} <span className="text-slate-500 text-sm font-mono tracking-widest font-normal ml-2">"{tpl.callsign}"</span></h3>
-                    <p className="text-sm text-slate-400 mb-5 pb-4 border-b border-slate-800">{tpl.origin}</p>
-                    
-                    <div className="grid grid-cols-3 gap-2 text-xs font-mono mb-6">
-                      <span className="bg-slate-950/50 px-2 py-1.5 rounded border border-slate-800 text-center">MIG: {tpl.attributes.MIG}</span>
-                      <span className="bg-slate-950/50 px-2 py-1.5 rounded border border-slate-800 text-center">REF: {tpl.attributes.REF}</span>
-                      <span className="bg-slate-950/50 px-2 py-1.5 rounded border border-slate-800 text-center text-amber-600">WIL: {tpl.attributes.WIL}</span>
+            
+            {isCreatingCustom ? (
+              <div className="bg-slate-900/80 border border-slate-700 rounded p-6 shadow-xl flex flex-col h-[60vh]">
+                <div className="flex-1 overflow-y-auto font-serif text-slate-300 pr-4 space-y-6">
+                  {creationHistory.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === 'player' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`p-4 rounded max-w-[80%] ${msg.role === 'player' ? 'bg-amber-900/20 border border-amber-700/50 text-amber-100' : 'bg-slate-950 border-l-2 border-amber-600 shadow-lg text-slate-200'}`}>
+                        <div className={`text-xs font-bold mb-1 ${msg.role === 'player' ? 'text-amber-500' : 'text-amber-600 uppercase tracking-widest'}`}>
+                          {msg.role === 'player' ? 'You' : 'Machine Spirit'}
+                        </div>
+                        {msg.content}
+                      </div>
                     </div>
-                    
-                    {isTaken ? (
-                      <span className="text-red-900 text-sm font-bold uppercase tracking-widest block text-center bg-red-950/20 py-2 rounded">Assigned</span>
-                    ) : (
-                      <span className="text-amber-700 text-sm uppercase tracking-widest group-hover:text-amber-400 block text-center transition-colors">Select Operative →</span>
-                    )}
+                  ))}
+                  {isCreationProcessing && (
+                    <div className="flex justify-start">
+                      <div className="p-4 bg-slate-950 border-l-2 border-amber-600 shadow-lg animate-pulse text-slate-500 font-mono text-xs uppercase tracking-widest">
+                        Generating query parameters...
+                      </div>
+                    </div>
+                  )}
+                  <div ref={creationEndRef} />
+                </div>
+                <div className="mt-4 pt-4 border-t border-slate-800 relative">
+                  <input 
+                    type="text" 
+                    value={creationInput}
+                    onChange={e => setCreationInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') sendCreationReply(); }}
+                    placeholder="Describe your character..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded py-3 pl-4 pr-12 text-slate-200 outline-none focus:border-amber-600 transition-colors font-mono text-sm"
+                    disabled={isCreationProcessing}
+                  />
+                  <button onClick={sendCreationReply} disabled={isCreationProcessing} className="absolute right-3 top-[32px] text-slate-500 hover:text-amber-500">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-6">
+                {templates.map(tpl => {
+                  const isTaken = Object.values(roomState.characters).some(c => c.character_id === tpl.character_id);
+                  return (
+                    <div 
+                      key={tpl.character_id} 
+                      className={`group p-6 border rounded shadow-lg transition-all duration-300 ${isTaken ? 'border-slate-800 opacity-40 bg-slate-900/30 cursor-not-allowed' : 'border-slate-700 bg-slate-900/80 hover:border-amber-500/80 hover:bg-slate-900 cursor-pointer hover:-translate-y-1'}`} 
+                      onClick={() => !isTaken && joinRoomAs(tpl.character_id)}
+                    >
+                      <h3 className="text-xl font-bold text-amber-400 mb-1">{tpl.name} <span className="text-slate-500 text-sm font-mono tracking-widest font-normal ml-2">"{tpl.callsign}"</span></h3>
+                      <p className="text-sm text-slate-400 mb-5 pb-4 border-b border-slate-800">{tpl.origin}</p>
+                      
+                      <div className="grid grid-cols-3 gap-2 text-xs font-mono mb-6">
+                        <span className="bg-slate-950/50 px-2 py-1.5 rounded border border-slate-800 text-center">MIG: {tpl.attributes.MIG}</span>
+                        <span className="bg-slate-950/50 px-2 py-1.5 rounded border border-slate-800 text-center">REF: {tpl.attributes.REF}</span>
+                        <span className="bg-slate-950/50 px-2 py-1.5 rounded border border-slate-800 text-center text-amber-600">WIL: {tpl.attributes.WIL}</span>
+                      </div>
+                      
+                      {isTaken ? (
+                        <span className="text-red-900 text-sm font-bold uppercase tracking-widest block text-center bg-red-950/20 py-2 rounded">Assigned</span>
+                      ) : (
+                        <span className="text-amber-700 text-sm uppercase tracking-widest group-hover:text-amber-400 block text-center transition-colors">Select Operative →</span>
+                      )}
+                    </div>
+                  );
+                })}
+                
+                {/* Custom Character Card */}
+                <div 
+                  className="group p-6 border border-slate-700 border-dashed rounded shadow-lg bg-slate-900/50 hover:border-amber-500/80 hover:bg-slate-900 cursor-pointer hover:-translate-y-1 transition-all duration-300 flex flex-col items-center justify-center min-h-[250px]"
+                  onClick={startCustomCreation}
+                >
+                  <div className="w-12 h-12 rounded-full border-2 border-slate-600 group-hover:border-amber-500 flex items-center justify-center mb-4 transition-colors">
+                    <svg className="w-6 h-6 text-slate-500 group-hover:text-amber-400 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                   </div>
-                );
-              })}
-            </div>
+                  <h3 className="text-xl font-bold text-slate-300 group-hover:text-amber-400 mb-2 transition-colors">Custom Operative</h3>
+                  <p className="text-sm text-slate-500 text-center px-4 font-mono">Establish a direct Vox-link with the Machine Spirit to forge your own origin story.</p>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="w-full max-w-6xl flex gap-6 h-[calc(100vh-8rem)]">

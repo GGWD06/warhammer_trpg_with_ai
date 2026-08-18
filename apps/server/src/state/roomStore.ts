@@ -4,6 +4,7 @@ import { RoomState } from '@ai-trpg/shared';
 
 export interface ServerRoomState extends RoomState {
   history?: { role: 'system' | 'user' | 'assistant', content: string }[];
+  summary?: string;
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data', 'rooms');

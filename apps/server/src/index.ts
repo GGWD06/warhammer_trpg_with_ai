@@ -126,6 +126,28 @@ app.post('/api/rooms/:room_id/start', async (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/rooms/:room_id/custom_char/start', async (req, res) => {
+  const result = await gameEngine.handleCharacterCreationStart();
+  res.json(result);
+});
+
+app.post('/api/rooms/:room_id/custom_char/reply', async (req, res) => {
+  const { reply, state } = req.body;
+  const result = await gameEngine.handleCharacterCreationReply(reply, state);
+  
+  // 如果生成了最终的角色卡，我们需要把它加入房间
+  if (result.character_card) {
+    const roomId = req.params.room_id;
+    const room = roomStore.memoryRooms[roomId];
+    if (room) {
+      room.characters[result.character_card.character_id] = result.character_card;
+      roomStore.saveRoomState(roomId);
+    }
+  }
+  
+  res.json(result);
+});
+
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 
