@@ -130,7 +130,7 @@ export class GameEngineService {
     }
   }
 
-  private async evaluateIntentions(room: RoomState, intentions: PlayerIntention[]): Promise<any> {
+  private async evaluateIntentions(room: any, intentions: PlayerIntention[]): Promise<any> {
     const systemPrompt = `
 You are the Rule Arbiter for a Warhammer 40k PbtA TRPG.
 Review the following player intentions. Determine if ANY of their actions trigger a risky move that requires a dice roll based on standard narrative TRPG rules (e.g. attacking, dodging, investigating under pressure).
@@ -240,8 +240,9 @@ Return JSON ONLY with no markdown formatting:
       });
 
       const responseText = completion.choices[0].message.content || '{}';
-      room.history.push({ role: 'assistant', content: responseText });
-      return JSON.parse(responseText);
+      const parsedResult = JSON.parse(responseText);
+      room.history.push({ role: 'assistant', content: parsedResult.narration || '' });
+      return parsedResult;
     } catch (e) {
        console.error('generateNarration error:', e);
        // Fallback
@@ -290,6 +291,11 @@ Return JSON ONLY with no markdown formatting:
       if (update.type === 'scene_change' && update.value) {
         room.current_scene = update.value;
         console.log(`[Scene Change] -> ${update.value}`);
+        
+        // 广播场景切换系统消息
+        this.io.to(room.room_id).emit('system_message', { 
+          content: `[ZONE TRANSITION] Operatives have entered: ${update.value}` 
+        });
         continue;
       }
 

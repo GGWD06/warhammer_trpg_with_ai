@@ -128,6 +128,7 @@ export default function RoomPage() {
   };
 
   const handleStartAdventure = async () => {
+    if (isProcessing) return;
     try {
       setIsProcessing(true);
       await fetch(`${SERVER_URL}/api/rooms/${roomId}/start`, { method: 'POST' });
@@ -194,9 +195,14 @@ export default function RoomPage() {
         const newCharId = data.character_card.character_id;
         setMyCharacterId(newCharId);
         localStorage.setItem(`trpg_char_${roomId}`, newCharId);
-        const stateRes = await fetch(`${SERVER_URL}/api/rooms/${roomId}`);
-        const stateData = await stateRes.json();
-        setRoomState(stateData);
+        
+        if (data.room_state) {
+           setRoomState(data.room_state);
+        } else {
+           const stateRes = await fetch(`${SERVER_URL}/api/rooms/${roomId}`);
+           const stateData = await stateRes.json();
+           setRoomState(stateData);
+        }
         setIsCreatingCustom(false);
       }
     } catch (err) {
@@ -227,6 +233,19 @@ export default function RoomPage() {
             
             {isCreatingCustom ? (
               <div className="bg-slate-900/80 border border-slate-700 rounded p-6 shadow-xl flex flex-col h-[60vh]">
+                <div className="flex justify-between items-center mb-4 border-b border-slate-800 pb-3">
+                   <h3 className="text-amber-500 font-bold tracking-widest uppercase text-sm flex items-center">
+                      <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                      Vox-Link: Machine Spirit
+                   </h3>
+                   <button 
+                     onClick={() => setIsCreatingCustom(false)}
+                     className="text-slate-500 hover:text-amber-500 text-xs font-mono uppercase tracking-widest transition-colors flex items-center"
+                   >
+                     ← Abort
+                   </button>
+                </div>
+                
                 <div className="flex-1 overflow-y-auto font-serif text-slate-300 pr-4 space-y-6">
                   {creationHistory.map((msg, i) => (
                     <div key={i} className={`flex ${msg.role === 'player' ? 'justify-end' : 'justify-start'}`}>

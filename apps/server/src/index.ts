@@ -51,13 +51,16 @@ app.post('/api/rooms', (req, res) => {
   const { module_id, campaign_mode, combat_mode } = req.body;
   const room_id = `r_${crypto.randomUUID().substring(0, 6)}`;
   
+  const moduleData = moduleService.getModule(module_id);
+  const initialScene = moduleData?.scenes?.[0]?.name || '登船甲板';
+  
   roomStore.memoryRooms[room_id] = {
     room_id,
     module_id,
     campaign_mode,
     combat_mode,
     characters: {},
-    current_scene: '登船甲板', // 沉船的低语起始场景
+    current_scene: initialScene,
     quests: questService.loadQuests(room_id)
   };
 
@@ -142,6 +145,8 @@ app.post('/api/rooms/:room_id/custom_char/reply', async (req, res) => {
     if (room) {
       room.characters[result.character_card.character_id] = result.character_card;
       roomStore.saveRoomState(roomId);
+      // 将更新后的房间状态一并返回，避免前端时序竞态
+      return res.json({ ...result, room_state: roomStore.getPublicRoomState(roomId) });
     }
   }
   

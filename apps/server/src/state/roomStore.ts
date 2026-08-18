@@ -61,7 +61,7 @@ export class RoomStore {
   public getPublicRoomState(roomId: string): RoomState | null {
     const room = this.memoryRooms[roomId];
     if (!room) return null;
-    const { history, ...publicRoom } = room;
+    const { history, summary, ...publicRoom } = room;
     return publicRoom;
   }
 }
