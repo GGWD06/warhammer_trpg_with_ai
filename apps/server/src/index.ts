@@ -113,6 +113,19 @@ app.post('/api/rooms/:room_id/join', (req, res) => {
   res.json({ success: true, character: template });
 });
 
+app.post('/api/rooms/:room_id/start', async (req, res) => {
+  const room = roomStore.memoryRooms[req.params.room_id];
+  if (!room) {
+    res.status(404).json({ error: 'Room not found' });
+    return;
+  }
+  
+  // 异步触发开场叙事
+  gameEngine.generateOpeningNarration(room.room_id);
+  
+  res.json({ success: true });
+});
+
 io.on('connection', (socket) => {
   console.log('A user connected:', socket.id);
 

@@ -115,6 +115,16 @@ export default function RoomPage() {
     }
   };
 
+  const handleStartAdventure = async () => {
+    try {
+      setIsProcessing(true);
+      await fetch(`${SERVER_URL}/api/rooms/${roomId}/start`, { method: 'POST' });
+    } catch (err) {
+      console.error(err);
+      setIsProcessing(false);
+    }
+  };
+
   const sendMessage = () => {
     if (!inputValue.trim() || !socket || !myCharacterId || !roomState) return;
 
@@ -282,6 +292,19 @@ export default function RoomPage() {
                      -- Encrypted Comm Link Established --
                    </p>
                  </div>
+                 
+                 {chatLog.length === 0 && !isProcessing && (
+                   <div className="flex flex-col items-center justify-center h-full space-y-6">
+                     <p className="text-slate-500 font-mono text-sm tracking-wider">Awaiting Mission Briefing</p>
+                     <button 
+                       onClick={handleStartAdventure}
+                       className="px-6 py-3 bg-amber-900/30 hover:bg-amber-800/40 border border-amber-700/50 hover:border-amber-500 text-amber-500 hover:text-amber-400 rounded tracking-widest uppercase font-bold transition-all duration-300 hover:shadow-[0_0_15px_rgba(217,119,6,0.3)]"
+                     >
+                       Begin Adventure (Start Narration)
+                     </button>
+                   </div>
+                 )}
+
                  {chatLog.map((msg, i) => {
                     const isMine = msg.character_id === myCharacterId;
                     const isDM = msg.character_name === 'DM (AI)';

@@ -38,7 +38,7 @@ export interface PlayerIntention {
 
 // AI 返回的状态更新指令
 export interface StateUpdateCommand {
-  type: 'hp_change' | 'fear_change' | 'corruption_change' | 'item_gain' | 'item_loss' | 'custom_status' | 'quest_update';
+  type: 'hp_change' | 'fear_change' | 'corruption_change' | 'item_gain' | 'item_loss' | 'custom_status' | 'quest_update' | 'scene_change';
   character_id?: string; // 对于 quest_update 可选
   quest_id?: string; // 用于 quest_update，必须是预定义的 id
   delta?: number; // 用于数值增减

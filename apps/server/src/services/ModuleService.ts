@@ -9,6 +9,7 @@ export interface ModuleRawData {
   content_warnings: string[];
   full_content: string; // MVP 阶段将整个 Markdown 文本留给 Prompt 使用
   predefined_quests?: any[];
+  scenes?: { name: string; description: string; trigger_condition: string }[];
 }
 
 export class ModuleService {
@@ -47,6 +48,23 @@ export class ModuleService {
           }
         }
 
+        // 简单提取场景表格 (以 "\| 场景 \| 描述要点 \|" 开始)
+        const scenes: { name: string; description: string; trigger_condition: string }[] = [];
+        const sceneTableMatch = content.match(/\| 场景 \| 描述要点 \| 触发条件 \|\n\|---\|---\|---\|\n([\s\S]*?)(?=\n\n|\n---|$)/);
+        if (sceneTableMatch && sceneTableMatch[1]) {
+          const lines = sceneTableMatch[1].split('\n').filter(l => l.trim().startsWith('|'));
+          for (const line of lines) {
+            const cols = line.split('|').map(c => c.trim());
+            if (cols.length >= 4) {
+              scenes.push({
+                name: cols[1],
+                description: cols[2],
+                trigger_condition: cols[3]
+              });
+            }
+          }
+        }
+
         const moduleData: ModuleRawData = {
           module_id: metadata.module_id || `m_${file.replace('.md', '')}`,
           title: metadata.title || file.replace('.md', ''),
@@ -54,7 +72,8 @@ export class ModuleService {
           difficulty: metadata.difficulty || 'hardcore',
           content_warnings: metadata.content_warnings || [],
           full_content: content,
-          predefined_quests: metadata.predefined_quests || []
+          predefined_quests: metadata.predefined_quests || [],
+          scenes: scenes
         };
 
         this.modules.set(moduleData.module_id, moduleData);

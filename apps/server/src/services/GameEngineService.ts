@@ -161,33 +161,48 @@ Output ONLY a JSON object in this format:
     }
   }
 
-  private async generateNarration(room: RoomState, intentions: PlayerIntention[], diceResultsStr: string): Promise<{narration: string, state_updates: StateUpdateCommand[]}> {
+  private async generateNarration(room: any, intentions: PlayerIntention[], diceResultsStr: string): Promise<{narration: string, state_updates: StateUpdateCommand[]}> {
     const moduleData = moduleService.getModule(room.module_id);
     
-    // 组装简单的 Prompt
+    // 获取当前场景节点
+    const currentSceneNode = moduleData?.scenes?.find(s => s.name === room.current_scene);
+    const sceneContext = currentSceneNode 
+      ? `You are currently in scene: [${currentSceneNode.name}].\nScene Description: ${currentSceneNode.description}\nTrigger Condition: ${currentSceneNode.trigger_condition}`
+      : `Current Scene: ${room.current_scene}`;
+
+    // 组装极具主动引导性的 Prompt
     const systemPrompt = `
-You are the Game Master for a Warhammer 40k TRPG.
-Current Scene: ${room.current_scene}
+You are the Game Master (DM) for a Warhammer 40k TRPG. Your role is NOT just to passively respond, but to actively drive the narrative forward, build tension, and guide the players.
+
+CRITICAL RULES FOR DM NARRATION:
+1. SENSORY DETAILS FIRST: Describe the environment using sights, sounds, or smells. Make the players feel the atmosphere.
+2. CREATE TENSION & PRESSURE: Introduce immediate threats, ticking clocks, or unsettling events (e.g., "The alarm blares louder," "Footsteps echo from the vent").
+3. END WITH A HOOK: NEVER end your narration passively. Always end by presenting a clear hook, choice, or immediate danger, followed by prompting the players (e.g., "What do you do?").
+4. DO NOT PLAY FOR THE PLAYERS: Describe the consequences of their actions and the changing environment, but never decide how they feel or what they do next.
+
+${sceneContext}
+
 Characters in scene:
-${Object.values(room.characters).map(c => `- ${c.name} (${c.origin})`).join('\n')}
+${Object.values(room.characters).map((c: any) => `- ${c.name} (${c.origin})`).join('\n')}
 
 Module Background:
-${moduleData ? moduleData.full_content.substring(0, 1500) : ''}
+${moduleData ? moduleData.full_content.substring(0, 1000) : ''}
 
 Predefined Quests:
 ${moduleData?.predefined_quests ? moduleData.predefined_quests.map(q => `- [${q.id}] ${q.title}: ${q.description}`).join('\n') : 'None'}
 
 Current Quest Progress:
-${room.quests && Object.keys(room.quests).length > 0 ? Object.values(room.quests).map(q => `- [${q.quest_id}] ${q.title} (${q.status}): ${q.progress_description}`).join('\n') : 'None'}
+${room.quests && Object.keys(room.quests).length > 0 ? Object.values(room.quests).map((q: any) => `- [${q.quest_id}] ${q.title} (${q.status}): ${q.progress_description}`).join('\n') : 'None'}
 
-Please provide a narrative response and state updates. 
+If the players move to a clearly different location described in the module, output a "scene_change" state update.
 If a player took damage, output a "hp_change" with delta < 0.
-If the players' actions progress any quests, output a "quest_update" state update. You MUST use one of the predefined quest_ids above. Do not invent your own quest_ids. 
+If the players' actions progress any quests, output a "quest_update" state update (MUST use predefined quest_ids).
 
 Return JSON ONLY with no markdown formatting:
 {
-  "narration": "Your rich narrative text here...",
+  "narration": "Your rich, proactive narrative text ending with a hook...",
   "state_updates": [
+    { "type": "scene_change", "value": "New Scene Name" },
     { "type": "hp_change", "character_id": "...", "delta": -1, "reason": "Took a hit" },
     { "type": "quest_update", "quest_id": "main_01_investigate_cargo", "value": { "status": "in_progress", "progress_description": "Found a key" } }
   ]
@@ -266,6 +281,12 @@ Return JSON ONLY with no markdown formatting:
         continue;
       }
 
+      if (update.type === 'scene_change' && update.value) {
+        room.current_scene = update.value;
+        console.log(`[Scene Change] -> ${update.value}`);
+        continue;
+      }
+
       const char = update.character_id ? room.characters[update.character_id] : null;
       if (!char) continue;
       
@@ -312,6 +333,72 @@ Return JSON ONLY with no markdown formatting:
 
     if (questsUpdated && room.quests) {
       questService.saveQuests(room.room_id, room.quests);
+    }
+  }
+
+  public async generateOpeningNarration(roomId: string): Promise<void> {
+    const room = roomStore.memoryRooms[roomId];
+    if (!room) return;
+    
+    const moduleData = moduleService.getModule(room.module_id);
+    const currentSceneNode = moduleData?.scenes?.find(s => s.name === room.current_scene);
+    const sceneContext = currentSceneNode 
+      ? `The adventure starts in scene: [${currentSceneNode.name}].\nScene Description: ${currentSceneNode.description}`
+      : `The adventure starts in: ${room.current_scene}`;
+
+    const systemPrompt = `
+You are the Game Master for a Warhammer 40k TRPG. Generate the OPENING NARRATION for the campaign.
+
+CRITICAL RULES:
+1. SET THE MOOD: Use strong sensory details to establish a dark, gritty, and dangerous atmosphere.
+2. DESCRIBE THE SCENE: Based on the Scene Description, tell the players exactly where they are and what they immediately perceive.
+3. END WITH A HOOK: End by prompting the players for their first action (e.g., "The airlock hisses open... what do you do?").
+
+${sceneContext}
+
+Characters present:
+${Object.values(room.characters).map((c: any) => `- ${c.name} (${c.origin})`).join('\n')}
+
+Module Background:
+${moduleData ? moduleData.full_content.substring(0, 1000) : ''}
+
+Return JSON ONLY with no markdown formatting:
+{
+  "narration": "Your opening narrative text...",
+  "state_updates": []
+}
+`;
+
+    try {
+      this.io.to(roomId).emit('system_state', { processing: true });
+      
+      const completion = await openai.chat.completions.create({
+        model: "deepseek/deepseek-chat",
+        messages: [{ role: "system", content: systemPrompt }],
+        response_format: { type: "json_object" }
+      });
+      
+      const responseText = completion.choices[0].message.content || '{}';
+      const result = JSON.parse(responseText);
+      
+      if (!room.history) room.history = [];
+      room.history.push({ role: 'assistant', content: result.narration });
+      
+      this.io.to(roomId).emit('narrative_broadcast', {
+        content: result.narration,
+        timestamp: Date.now()
+      });
+      
+      if (result.state_updates && result.state_updates.length > 0) {
+        this.applyStateUpdates(room, result.state_updates);
+        this.io.to(roomId).emit('room_state_sync', roomStore.getPublicRoomState(roomId));
+      }
+      
+    } catch (e) {
+      console.error('generateOpeningNarration error:', e);
+      this.io.to(roomId).emit('system_message', { content: '[SYSTEM ERROR] Failed to initialize Vox-Link.' });
+    } finally {
+      this.io.to(roomId).emit('system_state', { processing: false });
     }
   }
 }
